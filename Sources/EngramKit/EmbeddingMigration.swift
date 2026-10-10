@@ -58,6 +58,30 @@ public enum EmbeddingMigration {
         }
     }
 
+    /// The MCP server's startup backstop: sweep the hub through a handle of
+    /// its own, then release that handle's read snapshot.
+    ///
+    /// The marker read opens a read snapshot on the Lattice instance this
+    /// handle shares with the server's long-lived handle. Lattice expires an
+    /// idle snapshot only while the handle that made the instance's first read
+    /// is alive, so dropping this handle would leave the WAL read lock held
+    /// until the next tool call. A server that never gets one blocks every
+    /// checkpoint for the rest of its session.
+    public static func runBackstop(from ref: LatticeThreadSafeReference,
+                                   embedder: EmbeddingService,
+                                   log: @escaping @Sendable (String) -> Void) async {
+        guard let lattice = ref.resolve() else { return }
+        defer { lattice.retireAllGenerations() }
+        do {
+            let report = try await runIfNeeded(on: lattice, embedder: embedder, log: log)
+            if report.reembedded > 0 {
+                log("Embedding backstop: re-embedded \(report.reembedded) rows to space v\(EmbeddingSpace.currentVersion)")
+            }
+        } catch {
+            log("Embedding backstop failed (daemon or next start retries): \(error)")
+        }
+    }
+
     /// Sweep `lattice` if its stored space version is behind. `force` runs
     /// the sweep regardless of the marker (calibration / repair).
     /// `useMarker: false` = markerless mode for GROUP SPOKES: their schema

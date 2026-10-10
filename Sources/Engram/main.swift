@@ -185,16 +185,7 @@ let tools = MemoryTools(
 // harmless (identical vectors, identical marker). Detached at background
 // priority: must never delay server startup.
 Task.detached(priority: .background) { [ref = localLattice.sendableReference] in
-    guard let lattice = ref.resolve() else { return }
-    do {
-        let report = try await EmbeddingMigration.runIfNeeded(
-            on: lattice, embedder: embedder, log: log)
-        if report.reembedded > 0 {
-            log("Embedding backstop: re-embedded \(report.reembedded) rows to space v\(EmbeddingSpace.currentVersion)")
-        }
-    } catch {
-        log("Embedding backstop failed (daemon or next start retries): \(error)")
-    }
+    await EmbeddingMigration.runBackstop(from: ref, embedder: embedder, log: log)
 }
 
 let server = Server(
